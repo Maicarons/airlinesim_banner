@@ -127,7 +127,7 @@ const generateBanner = async () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          airlineName: form.airlineName,
+          airlineName: form.airlineName.trim(),
           prompt: form.prompt,
           logoPosition: form.logoPosition,
           aiProvider: form.aiProvider,
@@ -136,7 +136,7 @@ const generateBanner = async () => {
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.message || '生成失败');
+        throw new Error(error.message || `生成失败 (${response.status})`);
       }
 
       const data = await response.json();
@@ -153,6 +153,7 @@ const generateBanner = async () => {
 
       ElMessage.success(t('messages.success'));
     } catch (error: any) {
+      console.error('生成横幅失败:', error);
       ElMessage.error(error.message || t('messages.error'));
     } finally {
       loading.value = false;

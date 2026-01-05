@@ -19,12 +19,22 @@ export default async function handler(
     const { airlineName, prompt, logoPosition, aiProvider } =
       req.body as GenerateRequest;
 
-    if (!airlineName) {
+    // 参数验证
+    if (!airlineName || typeof airlineName !== 'string' || airlineName.trim().length === 0) {
       return res.status(400).json({ message: '航空公司名称不能为空' });
     }
 
+    // 验证其他参数
+    if (logoPosition && !['left', 'right', 'none'].includes(logoPosition)) {
+      return res.status(400).json({ message: 'Logo位置参数无效' });
+    }
+
+    if (aiProvider && !['doubao', 'tongyi'].includes(aiProvider)) {
+      return res.status(400).json({ message: 'AI提供商参数无效' });
+    }
+
     // 构建提示词
-    const fullPrompt = buildPrompt(airlineName, prompt, logoPosition);
+    const fullPrompt = buildPrompt(airlineName.trim(), prompt, logoPosition || 'left');
 
     // 生成300x100的横幅
     const banner300x100 = await generateImage(fullPrompt, 300, 100, aiProvider);
@@ -104,13 +114,13 @@ async function generateWithDoubao(
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,
+        'User-Agent': 'Airlinesim-Banner-Generator/1.0',
       },
       body: JSON.stringify({
         model: model,
         prompt: prompt,
-        width: width,
-        height: height,
         n: 1,
+        size: `${width}x${height}`, // 使用标准格式
       }),
     });
 
@@ -161,7 +171,7 @@ async function generateWithTongyi(
 
   // 通义万相API端点
   const endpoint = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis';
-  const model = process.env.TONGYI_MODEL || 'wan2.2-t2i-flash';
+  const model = process.env.TONGYI_MODEL || 'wanx-v1';
 
   try {
     const response = await fetch(endpoint, {
@@ -169,6 +179,7 @@ async function generateWithTongyi(
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,
+        'User-Agent': 'Airlinesim-Banner-Generator/1.0',
       },
       body: JSON.stringify({
         model: model,
@@ -176,7 +187,7 @@ async function generateWithTongyi(
           prompt: prompt,
         },
         parameters: {
-          size: `${width}*${height}`,
+          size: `${width}x${height}`, // 使用标准格式
           n: 1,
         },
       }),
@@ -226,13 +237,24 @@ async function resizeImage(
     // 动态导入sharp（避免在Vercel环境中出现问题）
     const sharp = (await import('sharp')).default;
     
-    // 获取图片
-    const imageResponse = await fetch(imageUrl);
-    if (!imageResponse.ok) {
-      throw new Error('无法获取图片');
+    let imageBuffer: Buffer;
+    
+    // 检查imageUrl是否为base64格式
+    if (imageUrl.startsWith('data:')) {
+      // 如果是base64格式，提取buffer
+      const base64Data = imageUrl.split(',')[1];
+      if (!base64Data) {
+        throw new Error('无效的base64图片数据');
+      }
+      imageBuffer = Buffer.from(base64Data, 'base64');
+    } else {
+      // 如果是URL格式，获取图片
+      const imageResponse = await fetch(imageUrl);
+      if (!imageResponse.ok) {
+        throw new Error(`无法获取图片: ${imageResponse.status} ${imageResponse.statusText}`);
+      }
+      imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
     }
-
-    const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
 
     // 使用sharp调整图片尺寸
     const resizedBuffer = await sharp(imageBuffer)
@@ -248,7 +270,7 @@ async function resizeImage(
     return `data:image/png;base64,${base64}`;
   } catch (error: any) {
     console.error('图片尺寸调整失败:', error);
-    // 如果sharp不可用，返回原图URL（降级方案）
+    // 如果sharp不可用或处理失败，返回原图（如果是base64格式则返回，否则返回URL）
     return imageUrl;
   }
 }
